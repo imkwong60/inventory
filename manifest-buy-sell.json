@@ -2,7 +2,7 @@
   "name": "買賣物件記錄",
   "short_name": "買賣記錄",
   "description": "大型電器、電話等買入賣出記錄，本機＋雲端同步",
-  "start_url": "./inventory.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",
