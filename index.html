@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="zh-Hant" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
+  <title>買賣物件記錄</title>
+  <meta name="description" content="買賣物件記錄 · 本機＋雲端同步" />
+  <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
+  <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="買賣記錄" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="manifest-buy-sell.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            darkBg: '#0f172a',
+            darkPanel: '#1e293b'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', 'Microsoft JhengHei', 'PingFang TC', 'Noto Sans TC', system-ui, sans-serif; }
+    .fade-in { animation: fadeIn .2s ease; }
+    @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 dark:bg-darkBg dark:text-slate-100 min-h-screen">
+
+  <header class="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-darkPanel/90 backdrop-blur">
+    <div class="max-w-3xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-lg font-bold">買賣物件記錄</h1>
+        <p id="syncStatus" class="text-xs text-slate-500">就緒</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <button onclick="toggleTheme()" class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" title="主題">🌓</button>
+        <button onclick="openRatesModal()" class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800" title="匯率">匯率</button>
+        <button onclick="exportJSON()" class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">匯出 JSON</button>
+        <label class="px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+          匯入 JSON
+          <input type="file" accept=".json,application/json" class="hidden" onchange="importJSON(event)" />
+        </label>
+        <button onclick="openForm()" class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white">＋ 新增</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-3xl mx-auto px-4 py-4 space-y-4">
+    <!-- 結算年分 -->
+    <section class="flex flex-wrap items-center gap-2 text-sm">
+      <span class="text-xs text-slate-500">結算範圍</span>
+      <select id="settleYear" onchange="renderStats()"
+        class="px-3 py-1.5 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <option value="all">全部年份</option>
+      </select>
+      <span class="text-[11px] text-slate-400">金額一律換算為港元</span>
+    </section>
+
+    <!-- 摘要 -->
+    <section class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-darkPanel p-3">
+        <div class="text-[11px] text-slate-500">持有中</div>
+        <div id="statOwned" class="text-xl font-bold font-mono">0</div>
+      </div>
+      <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-darkPanel p-3">
+        <div class="text-[11px] text-slate-500">已賣出</div>
+        <div id="statSold" class="text-xl font-bold font-mono">0</div>
+      </div>
+      <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-darkPanel p-3">
+        <div class="text-[11px] text-slate-500">購入總額（HKD）</div>
+        <div id="statBuy" class="text-xl font-bold font-mono text-sm sm:text-xl">HK$0</div>
+      </div>
+      <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-darkPanel p-3">
+        <div class="text-[11px] text-slate-500">已實現損益（HKD）</div>
+        <div id="statPnL" class="text-xl font-bold font-mono text-sm sm:text-xl">HK$0</div>
+      </div>
+    </section>
+
+    <!-- 篩選 -->
+    <section class="flex flex-wrap gap-2 items-center">
+      <input id="searchInput" type="search" placeholder="搜尋名稱、備註…" oninput="renderList()"
+        class="flex-1 min-w-[10rem] px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 outline-none focus:ring-2 focus:ring-blue-500" />
+      <select id="filterStatus" onchange="renderList()"
+        class="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <option value="all">全部狀態</option>
+        <option value="owned">持有中</option>
+        <option value="sold">已賣出</option>
+      </select>
+      <select id="filterCat" onchange="renderList()"
+        class="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+        <option value="all">全部類別</option>
+        <option value="電話">電話</option>
+        <option value="家電">家電</option>
+        <option value="電子產品">電子產品</option>
+        <option value="電玩收藏">電玩收藏</option>
+        <option value="其他">其他</option>
+      </select>
+    </section>
+
+    <!-- 列表 -->
+    <section id="itemList" class="space-y-2"></section>
+    <p id="emptyHint" class="hidden text-center text-sm text-slate-400 py-12">尚無記錄，按右上角「新增」開始</p>
+  </main>
+
+  <!-- 匯率設定 Modal -->
+  <div id="ratesModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-darkPanel shadow-xl fade-in p-5">
+      <h2 class="text-lg font-bold mb-1">匯率設定</h2>
+      <p class="text-xs text-slate-500 mb-4">1 單位外幣 = ? 港元（用於購入總額與損益結算）</p>
+      <div class="space-y-3">
+        <div class="flex items-center gap-3">
+          <span class="w-24 text-sm text-slate-500">美元 USD</span>
+          <input id="rateUSD" type="number" step="any" min="0" class="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono" />
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="w-24 text-sm text-slate-500">日元 JPY</span>
+          <input id="rateJPY" type="number" step="any" min="0" class="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono" />
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="w-24 text-sm text-slate-500">人民幣 CNY</span>
+          <input id="rateCNY" type="number" step="any" min="0" class="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono" />
+        </div>
+        <p class="text-[11px] text-slate-400">港元固定為 1，無需設定</p>
+      </div>
+      <div class="flex justify-end gap-2 mt-5">
+        <button type="button" onclick="closeRatesModal()" class="px-3 py-2 text-sm rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800">取消</button>
+        <button type="button" onclick="saveRates()" class="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white">儲存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 表單 Modal -->
+  <div id="formModal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <div class="w-full max-w-md rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-darkPanel shadow-xl max-h-[90vh] overflow-y-auto fade-in">
+      <form onsubmit="saveItem(event)" class="p-5 space-y-3">
+        <h2 id="formTitle" class="text-lg font-bold">新增物件</h2>
+        <input type="hidden" id="itemId" />
+
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">名稱 *</label>
+          <input id="fName" required placeholder="例如：iPhone 15 Pro / 洗衣機"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">類別</label>
+            <select id="fCat"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+              <option value="電話">電話</option>
+              <option value="家電">家電</option>
+              <option value="電子產品">電子產品</option>
+              <option value="電玩收藏">電玩收藏</option>
+              <option value="其他">其他</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">狀態</label>
+            <select id="fStatus" onchange="toggleSellFields()"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+              <option value="owned">持有中</option>
+              <option value="sold">已賣出</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">貨幣</label>
+          <select id="fCurrency"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+            <option value="HKD">港元 HKD</option>
+            <option value="USD">美元 USD</option>
+            <option value="JPY">日元 JPY</option>
+            <option value="CNY">人民幣 CNY</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">買入日期</label>
+            <input id="fBuyDate" type="date" class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">買入價</label>
+            <input id="fBuyPrice" type="number" step="any" min="0" placeholder="0"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">購入處</label>
+          <input id="fBuyFrom" placeholder="商店 / 網站 / 二手…"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+        </div>
+
+        <div id="sellFields" class="grid grid-cols-2 gap-3 hidden">
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">賣出日期</label>
+            <input id="fSellDate" type="date" class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-500 mb-1">賣出價</label>
+            <input id="fSellPrice" type="number" step="any" min="0" placeholder="0"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 font-mono" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">序號 / 保固（選填）</label>
+          <input id="fSerial" placeholder="序號、保固到期…"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">備註</label>
+          <textarea id="fNotes" rows="2" placeholder="配件、維修、買家…"
+            class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"></textarea>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" onclick="closeForm()" class="px-3 py-2 text-sm rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800">取消</button>
+          <button type="submit" class="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white">儲存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] hidden px-4 py-2 rounded-full text-sm bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-lg"></div>
+
+  <script>
+    // ========== Supabase（與 Notepad / Calendar 同一專案）==========
+    const SUPABASE_URL = 'https://wanknivxcsrasdkkxmfr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhbmtuaXZ4Y3NyYXNka2t4bWZyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODczMzE4NjcsImV4cCI6MjEwMjkwNzg2N30.tqsFimERtYCxoh8J-8FlqxByWtX2gNnyaGo08jditrs';
+    const DATA_ROW_ID = 'buy_sell';          // notepad_data 裡的固定一列
+    const STORAGE_KEY = 'buy_sell_inventory_v1';
+    // ============================================================
+
+    const CATEGORIES = ['電話', '家電', '電子產品', '電玩收藏', '其他'];
+    const CURRENCIES = {
+      HKD: { label: '港元', symbol: 'HK$' },
+      USD: { label: '美元', symbol: 'US$' },
+      JPY: { label: '日元', symbol: '¥' },
+      CNY: { label: '人民幣', symbol: 'CN¥' }
+    };
+    const DEFAULT_RATES = { HKD: 1, USD: 7.8, JPY: 0.052, CNY: 1.08 };
+
+    let sb = null;
+    let isOnline = navigator.onLine;
+    let cloudTimer = null;
+    let lastCloudAt = null;
+
+    let state = {
+      items: [],
+      theme: 'dark',
+      rates: { ...DEFAULT_RATES }
+    };
+
+    function ensureSb() {
+      if (sb) return sb;
+      if (typeof window.supabase === 'undefined' || !window.supabase.createClient) return null;
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      return sb;
+    }
+
+    function uid() {
+      return 'item_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+    }
+
+    function money(n, currency) {
+      const v = Number(n) || 0;
+      const sym = (CURRENCIES[currency] && CURRENCIES[currency].symbol) || (currency ? currency + ' ' : 'HK$');
+      return sym + v.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    }
+
+    function getRate(currency) {
+      const rates = state.rates || DEFAULT_RATES;
+      if (!currency || currency === 'HKD') return 1;
+      const r = Number(rates[currency]);
+      return r > 0 ? r : (DEFAULT_RATES[currency] || 1);
+    }
+
+    /** 外幣金額 → 港元 */
+    function toHKD(amount, currency) {
+      return (Number(amount) || 0) * getRate(currency || 'HKD');
+    }
+
+    function today() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function yearOf(dateStr) {
+      if (!dateStr || dateStr.length < 4) return null;
+      return dateStr.slice(0, 4);
+    }
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => el.classList.add('hidden'), 2200);
+    }
+
+    function setStatus(t) {
+      document.getElementById('syncStatus').textContent = t;
+    }
+
+    // ----- local -----
+    function loadLocal() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return false;
+        const obj = JSON.parse(raw);
+        state.items = Array.isArray(obj.items) ? obj.items : [];
+        state.theme = obj.theme || 'dark';
+        state.rates = { ...DEFAULT_RATES, ...(obj.rates || {}) };
+        state.rates.HKD = 1;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function saveLocal() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    // ----- cloud：整份 JSON 存在 notepad_data -----
+    async function pullCloud() {
+      const client = ensureSb();
+      if (!client) return null;
+      try {
+        const { data, error } = await client
+          .from('notepad_data')
+          .select('data, updated_at')
+          .eq('id', DATA_ROW_ID)
+          .maybeSingle();
+        if (error) throw error;
+        if (!data) return null;
+        lastCloudAt = data.updated_at;
+        return data.data;
+      } catch (e) {
+        console.warn('pull', e);
+        return null;
+      }
+    }
+
+    async function pushCloud() {
+      const client = ensureSb();
+      if (!client || !isOnline) return false;
+      try {
+        const payload = {
+          id: DATA_ROW_ID,
+          data: state,
+          updated_at: new Date().toISOString()
+        };
+        const { error } = await client.from('notepad_data').upsert(payload, { onConflict: 'id' });
+        if (error) throw error;
+        lastCloudAt = payload.updated_at;
+        setStatus('已同步雲端');
+        return true;
+      } catch (e) {
+        console.warn('push', e);
+        setStatus('本機已存（雲端失敗）');
+        return false;
+      }
+    }
+
+    function schedulePush() {
+      saveLocal();
+      clearTimeout(cloudTimer);
+      if (!isOnline) {
+        setStatus('離線（僅本機）');
+        return;
+      }
+      setStatus('同步中…');
+      cloudTimer = setTimeout(() => pushCloud(), 500);
+    }
+
+    function persist() {
+      schedulePush();
+    }
+
+    // ----- theme -----
+    function applyTheme() {
+      document.documentElement.classList.toggle('dark', state.theme === 'dark');
+    }
+    function toggleTheme() {
+      state.theme = state.theme === 'dark' ? 'light' : 'dark';
+      applyTheme();
+      persist();
+    }
+
+    // ----- rates -----
+    function openRatesModal() {
+      const r = state.rates || DEFAULT_RATES;
+      document.getElementById('rateUSD').value = r.USD ?? DEFAULT_RATES.USD;
+      document.getElementById('rateJPY').value = r.JPY ?? DEFAULT_RATES.JPY;
+      document.getElementById('rateCNY').value = r.CNY ?? DEFAULT_RATES.CNY;
+      document.getElementById('ratesModal').classList.remove('hidden');
+      document.getElementById('ratesModal').classList.add('flex');
+    }
+
+    function closeRatesModal() {
+      document.getElementById('ratesModal').classList.add('hidden');
+      document.getElementById('ratesModal').classList.remove('flex');
+    }
+
+    function saveRates() {
+      const usd = parseFloat(document.getElementById('rateUSD').value);
+      const jpy = parseFloat(document.getElementById('rateJPY').value);
+      const cny = parseFloat(document.getElementById('rateCNY').value);
+      state.rates = {
+        HKD: 1,
+        USD: usd > 0 ? usd : DEFAULT_RATES.USD,
+        JPY: jpy > 0 ? jpy : DEFAULT_RATES.JPY,
+        CNY: cny > 0 ? cny : DEFAULT_RATES.CNY
+      };
+      closeRatesModal();
+      renderStats();
+      persist();
+      showToast('匯率已儲存');
+    }
+
+    // ----- form -----
+    function toggleSellFields() {
+      const sold = document.getElementById('fStatus').value === 'sold';
+      document.getElementById('sellFields').classList.toggle('hidden', !sold);
+    }
+
+    /** 持有年期：買入日 → 賣出日（或今天） */
+    function holdingText(buyDate, endDate) {
+      if (!buyDate) return '';
+      const start = new Date(buyDate + 'T00:00:00');
+      const end = new Date((endDate || today()) + 'T00:00:00');
+      if (isNaN(start) || isNaN(end) || end < start) return '';
+      const days = Math.round((end - start) / 86400000);
+      if (days < 30) return days + ' 日';
+      const months = Math.floor(days / 30.4375);
+      if (months < 12) return months + ' 個月';
+      const years = days / 365.25;
+      if (years < 2) {
+        const m = Math.floor((days % 365.25) / 30.4375);
+        return m > 0 ? `1 年 ${m} 個月` : '約 1 年';
+      }
+      return years.toFixed(1).replace(/\.0$/, '') + ' 年';
+    }
+
+    function openForm(item, opts) {
+      opts = opts || {};
+      document.getElementById('formModal').classList.remove('hidden');
+      document.getElementById('formModal').classList.add('flex');
+      const forceSell = !!opts.forceSell;
+      document.getElementById('formTitle').textContent = forceSell
+        ? '登記賣出'
+        : (item ? '編輯物件' : '新增物件');
+      document.getElementById('itemId').value = item?.id || '';
+      document.getElementById('fName').value = item?.name || '';
+      const cat = item?.category && CATEGORIES.includes(item.category) ? item.category : '電話';
+      document.getElementById('fCat').value = cat;
+      const status = forceSell ? 'sold' : (item?.status || 'owned');
+      document.getElementById('fStatus').value = status;
+      const cur = item?.currency && CURRENCIES[item.currency] ? item.currency : 'HKD';
+      document.getElementById('fCurrency').value = cur;
+      document.getElementById('fBuyDate').value = item?.buyDate || today();
+      document.getElementById('fBuyPrice').value = item?.buyPrice ?? '';
+      document.getElementById('fBuyFrom').value = item?.buyFrom || '';
+      document.getElementById('fSellDate').value = item?.sellDate || (forceSell ? today() : '');
+      document.getElementById('fSellPrice').value = item?.sellPrice ?? '';
+      document.getElementById('fSerial').value = item?.serial || '';
+      document.getElementById('fNotes').value = item?.notes || '';
+      toggleSellFields();
+      setTimeout(() => {
+        if (forceSell || status === 'sold') document.getElementById('fSellPrice').focus();
+        else document.getElementById('fName').focus();
+      }, 50);
+    }
+
+    /** 列表「賣出」：開啟編輯並預設已賣出 */
+    function openSell(id) {
+      const item = state.items.find(x => x.id === id);
+      if (!item) return;
+      openForm(item, { forceSell: true });
+    }
+
+    function closeForm() {
+      document.getElementById('formModal').classList.add('hidden');
+      document.getElementById('formModal').classList.remove('flex');
+    }
+
+    function saveItem(e) {
+      e.preventDefault();
+      const id = document.getElementById('itemId').value || uid();
+      let status = document.getElementById('fStatus').value;
+      const sellPriceRaw = document.getElementById('fSellPrice').value;
+      const sellPriceNum = parseFloat(sellPriceRaw);
+      const sellDate = document.getElementById('fSellDate').value || null;
+
+      // 有填賣出價 → 自動改為已賣出
+      if (sellPriceRaw !== '' && !isNaN(sellPriceNum) && sellPriceNum >= 0) {
+        status = 'sold';
+        document.getElementById('fStatus').value = 'sold';
+        toggleSellFields();
+      }
+
+      if (status === 'sold') {
+        if (sellPriceRaw === '' || isNaN(sellPriceNum) || sellPriceNum < 0) {
+          showToast('請填入賣出價');
+          document.getElementById('fSellPrice').focus();
+          return;
+        }
+        if (!sellDate) {
+          document.getElementById('fSellDate').value = today();
+        }
+      }
+
+      const row = {
+        id,
+        name: document.getElementById('fName').value.trim(),
+        category: document.getElementById('fCat').value || '電話',
+        currency: document.getElementById('fCurrency').value || 'HKD',
+        status,
+        buyDate: document.getElementById('fBuyDate').value || null,
+        buyPrice: parseFloat(document.getElementById('fBuyPrice').value) || 0,
+        buyFrom: document.getElementById('fBuyFrom').value.trim(),
+        sellDate: status === 'sold' ? (document.getElementById('fSellDate').value || today()) : null,
+        sellPrice: status === 'sold' ? sellPriceNum : null,
+        serial: document.getElementById('fSerial').value.trim(),
+        notes: document.getElementById('fNotes').value.trim(),
+        updatedAt: new Date().toISOString()
+      };
+      if (!row.name) return;
+
+      const idx = state.items.findIndex(x => x.id === id);
+      if (idx >= 0) state.items[idx] = row;
+      else state.items.unshift(row);
+
+      closeForm();
+      renderAll();
+      persist();
+      showToast(status === 'sold' ? '已登記賣出' : '已儲存');
+    }
+
+    function deleteItem(id) {
+      if (!confirm('確定刪除此筆？')) return;
+      state.items = state.items.filter(x => x.id !== id);
+      renderAll();
+      persist();
+      showToast('已刪除');
+    }
+
+    // ----- render -----
+    function fillSettleYears() {
+      const sel = document.getElementById('settleYear');
+      const prev = sel.value || 'all';
+      const years = new Set();
+      state.items.forEach(i => {
+        const yb = yearOf(i.buyDate);
+        const ys = yearOf(i.sellDate);
+        if (yb) years.add(yb);
+        if (ys) years.add(ys);
+      });
+      const sorted = [...years].sort((a, b) => b.localeCompare(a));
+      sel.innerHTML = '<option value="all">全部年份</option>' +
+        sorted.map(y => `<option value="${y}">${y} 年</option>`).join('');
+      if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+      else sel.value = 'all';
+    }
+
+    function itemsForSettle() {
+      const y = document.getElementById('settleYear').value;
+      if (y === 'all') return state.items.slice();
+      // 購入總額：該年買入；已實現損益：該年賣出
+      return state.items.filter(i => yearOf(i.buyDate) === y || yearOf(i.sellDate) === y);
+    }
+
+    function renderStats() {
+      fillSettleYears();
+      const y = document.getElementById('settleYear').value;
+
+      const owned = state.items.filter(i => i.status === 'owned');
+      const soldAll = state.items.filter(i => i.status === 'sold');
+
+      // 購入：依買入年；損益：依賣出年
+      const buyItems = y === 'all'
+        ? state.items
+        : state.items.filter(i => yearOf(i.buyDate) === y);
+      const soldItems = y === 'all'
+        ? soldAll
+        : soldAll.filter(i => yearOf(i.sellDate) === y);
+
+      const buyTotalHKD = buyItems.reduce((s, i) => s + toHKD(i.buyPrice, i.currency), 0);
+      const pnlHKD = soldItems.reduce((s, i) => {
+        const sell = toHKD(i.sellPrice, i.currency);
+        const buy = toHKD(i.buyPrice, i.currency);
+        return s + (sell - buy);
+      }, 0);
+
+      document.getElementById('statOwned').textContent = owned.length;
+      document.getElementById('statSold').textContent = soldItems.length;
+      document.getElementById('statBuy').textContent = money(buyTotalHKD, 'HKD');
+      document.getElementById('statBuy').title = y === 'all' ? '全部購入（已按匯率換算港元）' : `${y} 年購入（已換算港元）`;
+
+      const pnlEl = document.getElementById('statPnL');
+      if (pnlHKD >= 0) pnlEl.textContent = '+' + money(pnlHKD, 'HKD');
+      else pnlEl.textContent = '-' + money(Math.abs(pnlHKD), 'HKD');
+      pnlEl.title = y === 'all' ? '全部已賣出損益（已換算港元）' : `${y} 年賣出之損益（已換算港元）`;
+      pnlEl.classList.toggle('text-emerald-600', pnlHKD > 0);
+      pnlEl.classList.toggle('text-red-500', pnlHKD < 0);
+    }
+
+    function renderList() {
+      const q = document.getElementById('searchInput').value.trim().toLowerCase();
+      const st = document.getElementById('filterStatus').value;
+      const cat = document.getElementById('filterCat').value;
+
+      let list = state.items.slice();
+      if (st !== 'all') list = list.filter(i => i.status === st);
+      if (cat !== 'all') list = list.filter(i => i.category === cat);
+      if (q) {
+        list = list.filter(i =>
+          (i.name || '').toLowerCase().includes(q) ||
+          (i.notes || '').toLowerCase().includes(q) ||
+          (i.serial || '').toLowerCase().includes(q) ||
+          (i.buyFrom || '').toLowerCase().includes(q)
+        );
+      }
+
+      // 持有中優先，再按買入日新到舊
+      list.sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'owned' ? -1 : 1;
+        return (b.buyDate || '').localeCompare(a.buyDate || '');
+      });
+
+      const box = document.getElementById('itemList');
+      const empty = document.getElementById('emptyHint');
+      if (list.length === 0) {
+        box.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+
+      box.innerHTML = list.map(i => {
+        const sold = i.status === 'sold';
+        const cur = i.currency || 'HKD';
+        const hold = holdingText(i.buyDate, sold ? i.sellDate : null);
+        const pnl = sold ? (Number(i.sellPrice) || 0) - (Number(i.buyPrice) || 0) : null;
+        let pnlBlock = '';
+        if (sold && pnl !== null) {
+          const earn = pnl >= 0;
+          const pnlHkd = toHKD(i.sellPrice, cur) - toHKD(i.buyPrice, cur);
+          const hkdHint = cur !== 'HKD'
+            ? ` <span class="text-slate-400 font-normal">（約 ${earn ? '+' : '-'}${money(Math.abs(pnlHkd), 'HKD')}）</span>`
+            : '';
+          pnlBlock = `<div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
+            <span class="font-mono font-semibold ${earn ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}">${earn ? '賺 ' : '蝕 '}${money(Math.abs(pnl), cur)}${hkdHint}</span>
+            ${hold ? `<span class="text-slate-400">· 持有 ${escapeHtml(hold)}</span>` : ''}
+          </div>`;
+        } else if (!sold && hold) {
+          pnlBlock = `<div class="mt-1 text-xs text-slate-400">已持有 ${escapeHtml(hold)}</div>`;
+        }
+        const safeJson = JSON.stringify(i).replace(/</g, '\\u003c').replace(/'/g, '&#39;');
+        return `
+          <div class="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-darkPanel p-3.5 flex gap-3 items-start">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-semibold truncate">${escapeHtml(i.name)}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded-full ${sold ? 'bg-slate-100 dark:bg-slate-800 text-slate-500' : 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300'}">${sold ? '已賣出' : '持有中'}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">${escapeHtml(i.category || '電話')}</span>
+                <span class="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">${escapeHtml(CURRENCIES[cur]?.label || cur)}</span>
+              </div>
+              <div class="mt-1 text-xs text-slate-500 space-y-0.5">
+                <div>買入 ${i.buyDate || '—'} · ${money(i.buyPrice, cur)}${i.buyFrom ? ' · ' + escapeHtml(i.buyFrom) : ''}</div>
+                ${sold ? `<div>賣出 ${i.sellDate || '—'} · ${money(i.sellPrice, cur)}</div>` : ''}
+                ${i.serial ? `<div>序號/保固：${escapeHtml(i.serial)}</div>` : ''}
+                ${i.notes ? `<div class="text-slate-600 dark:text-slate-400">${escapeHtml(i.notes)}</div>` : ''}
+              </div>
+              ${pnlBlock}
+            </div>
+            <div class="flex flex-col gap-1 shrink-0 items-end">
+              ${!sold ? `<button type="button" onclick="openSell('${i.id}')" class="px-2 py-1 text-[11px] font-medium rounded-lg bg-amber-500/90 hover:bg-amber-600 text-white" title="登記賣出">賣出</button>` : ''}
+              <div class="flex gap-0.5">
+                <button type="button" onclick='openForm(${safeJson})' class="p-1.5 text-slate-400 hover:text-blue-600 text-xs" title="編輯">✎</button>
+                <button type="button" onclick="deleteItem('${i.id}')" class="p-1.5 text-slate-400 hover:text-red-500 text-xs" title="刪除">✕</button>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    function renderAll() {
+      renderStats();
+      renderList();
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/[&<>"']/g, c =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    // ----- import / export -----
+    function exportJSON() {
+      const payload = {
+        version: 1,
+        exportDate: new Date().toISOString(),
+        rates: state.rates || DEFAULT_RATES,
+        items: state.items
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `買賣記錄_${today()}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast('已匯出 JSON');
+    }
+
+    function importJSON(ev) {
+      const file = ev.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          const items = Array.isArray(data) ? data : (data.items || []);
+          if (!Array.isArray(items)) throw new Error('格式不對');
+          if (!confirm(`匯入 ${items.length} 筆？\n「確定」= 覆蓋現有資料\n按取消則中止`)) {
+            ev.target.value = '';
+            return;
+          }
+          if (data.rates && typeof data.rates === 'object') {
+            state.rates = { ...DEFAULT_RATES, ...data.rates, HKD: 1 };
+          }
+          state.items = items.map(x => ({
+            id: x.id || uid(),
+            name: x.name || '未命名',
+            category: CATEGORIES.includes(x.category) ? x.category : (x.category || '電話'),
+            currency: CURRENCIES[x.currency] ? x.currency : 'HKD',
+            status: x.status === 'sold' ? 'sold' : 'owned',
+            buyDate: x.buyDate || null,
+            buyPrice: Number(x.buyPrice) || 0,
+            buyFrom: x.buyFrom || '',
+            sellDate: x.sellDate || null,
+            sellPrice: x.sellPrice != null ? Number(x.sellPrice) : null,
+            serial: x.serial || '',
+            notes: x.notes || '',
+            updatedAt: x.updatedAt || new Date().toISOString()
+          }));
+          renderAll();
+          persist();
+          showToast('匯入完成');
+        } catch (err) {
+          showToast('匯入失敗：JSON 格式錯誤');
+        }
+        ev.target.value = '';
+      };
+      reader.readAsText(file, 'UTF-8');
+    }
+
+    // ----- init -----
+    async function init() {
+      applyTheme();
+      ensureSb();
+
+      window.addEventListener('online', async () => {
+        isOnline = true;
+        setStatus('連線中，上傳…');
+        await pushCloud();
+      });
+      window.addEventListener('offline', () => {
+        isOnline = false;
+        setStatus('離線（僅本機）');
+      });
+
+      document.getElementById('formModal').addEventListener('click', (e) => {
+        if (e.target.id === 'formModal') closeForm();
+      });
+      document.getElementById('ratesModal').addEventListener('click', (e) => {
+        if (e.target.id === 'ratesModal') closeRatesModal();
+      });
+
+      if (isOnline && ensureSb()) {
+        setStatus('載入中…');
+        const remote = await pullCloud();
+        if (remote && Array.isArray(remote.items)) {
+          state.items = remote.items;
+          state.theme = remote.theme || state.theme;
+          state.rates = { ...DEFAULT_RATES, ...(remote.rates || {}) };
+          state.rates.HKD = 1;
+          saveLocal();
+          setStatus('已從雲端載入');
+        } else {
+          loadLocal();
+          await pushCloud();
+        }
+      } else {
+        loadLocal();
+        setStatus(isOnline ? '本機模式' : '離線（僅本機）');
+      }
+
+      applyTheme();
+      renderAll();
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw-buy-sell.js', { scope: './' })
+          .then((reg) => console.info('[買賣記錄] SW registered', reg.scope))
+          .catch((err) => console.warn('[買賣記錄] SW failed', err));
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
