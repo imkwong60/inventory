@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1" />
-  <title>買賣物件記錄</title>
-  <meta name="description" content="買賣物件記錄 · 本機＋雲端同步" />
+  <title>J.Law 買賣物件記錄</title>
+  <meta name="description" content="J.Law 買賣物件記錄 · 本機＋雲端同步" />
   <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)" />
   <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="apple-mobile-web-app-title" content="買賣記錄" />
+  <meta name="apple-mobile-web-app-title" content="J.Law 買賣物件記錄" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <link rel="manifest" href="manifest-buy-sell.json" />
+  <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -33,14 +33,18 @@
     body { font-family: 'Inter', 'Microsoft JhengHei', 'PingFang TC', 'Noto Sans TC', system-ui, sans-serif; }
     .fade-in { animation: fadeIn .2s ease; }
     @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+    /* iPhone 瀏海 / 動態島 */
+    .safe-header {
+      padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+    }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-900 dark:bg-darkBg dark:text-slate-100 min-h-screen">
 
-  <header class="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-darkPanel/90 backdrop-blur">
-    <div class="max-w-3xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+  <header class="sticky top-0 z-30 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-darkPanel/90 backdrop-blur safe-header">
+    <div class="max-w-3xl mx-auto px-4 pb-3 pt-2 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 class="text-lg font-bold">買賣物件記錄</h1>
+        <h1 class="text-lg font-bold">J.Law 買賣物件記錄</h1>
         <p id="syncStatus" class="text-xs text-slate-500">就緒</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -817,7 +821,7 @@
 
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw-buy-sell.js', { scope: './' })
+        navigator.serviceWorker.register('./sw.js', { scope: './' })
           .then((reg) => console.info('[買賣記錄] SW registered', reg.scope))
           .catch((err) => console.warn('[買賣記錄] SW failed', err));
       });
