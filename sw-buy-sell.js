@@ -1,7 +1,7 @@
 /* 買賣物件記錄 · 簡易 Service Worker（離線可開殼、資料仍靠 localStorage + Supabase） */
 const CACHE = 'buy-sell-v1';
 const ASSETS = [
-  './buy-sell-inventory.html',
+  './index.html',
   './manifest-buy-sell.json',
   './icon-192.png',
   './icon-512.png'
